@@ -76,6 +76,7 @@ int main(int argc, char* argv[]){
 			waitTime = (((tasks.tab[currentTask].hour*60)+tasks.tab[currentTask].minute)*60)
 			      -((((local_time->tm_hour*60)+local_time->tm_min)*60)+local_time->tm_sec);
 		};
+		syslog(LOG_DEBUG, "Executing task %d",currentTask);
 		execute(tasks.tab[currentTask].command,tasks.tab[currentTask].mode,argv[2]);
 		currentTask++;
 		if(currentTask>=tasks.size) break;

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <string.h>
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -14,59 +15,87 @@ void execute(char *task, int mode, char *output_file) {
     char **commands;
     int num_commands;
     int i;
-    int fds[2];
     pid_t pid;
+
+    pid_t pids[10];
+    int fds[10][2];
+
+    int outfd;
+
+    if(mode ==0) outfd = STDOUT_FILENO;
+    else if(mode ==1) outfd = STDERR_FILENO;
+    else outfd = open(output_file, O_CREAT | O_WRONLY | O_APPEND, 0644);
+    write(outfd, task, strlen(task));
+    write(outfd, "\n", 1);
 
     parse_command(task, &commands, &num_commands);
 
-    
-    // wykonanie kolejnych komend przy użyciu potoku
-    for (i = 0; i < num_commands; i++) {
-        // Create pipe
-        //pipe (fds);
-        if (fds[0] == NULL || fds[1] == NULL) {
-            //syslog(LOG_DEBUG, "Pipe create failed");
-            //exit(EXIT_FAILURE);
+    for (int i = 0; i < num_commands; i++) {
+
+        if (pipe(fds[i]) == -1) {
+            syslog(LOG_DEBUG, "Pipe create failed");
+            exit(EXIT_FAILURE);
         }
-        // Fork new process
+
         pid = fork();
         if (pid == (pid_t) 0) {
-            /* This is the child process. Close our copy of the write end of the file descriptor. */
-            //close (fds[1]);
-            /* Connect the read end of the pipe to standard input. */
-            //dup2 (fds[0], STDIN_FILENO);
-            /* Replace the child process with the "sort” program. */
-            //execlp ("sort", "sort", NULL);
-            syslog(LOG_DEBUG, "Child");
+        // Child process
+            if (i == num_commands - 1) {
+                dup2(outfd, STDOUT_FILENO);
+            }
+            else if (i < num_commands - 1) {
+                dup2(fds[i][1], STDOUT_FILENO);
+            }
+
+            if (i == 0) {
+                dup2(STDIN_FILENO, STDIN_FILENO);
+            }
+            else {
+                dup2(fds[i-1][0], STDIN_FILENO);
+            }
+            // isolate parameters from program
+            int j=0;
+            char *args[10];
+
+            char *arg = strtok(commands[i], " ");
+            args[j++] = arg;      
+
+            while ((arg = strtok(NULL, " ")) != NULL && j < 9) {
+                args[j++] = arg;
+            }
+            args[j] = NULL;
+            // execute
+            if (j == 1) execlp(args[0], args[0], NULL);
+            else  execvp(args[0], args);
+
+            syslog(LOG_DEBUG, "execlp failed");
             exit(EXIT_FAILURE);
         }
         else {
-            /* This is the parent process. */
-            //FILE* stream;
-            /* Close our copy of the read end of the file descriptor. */
-            //close (fds[0]);
-            /* Convert the write file descriptor to a FILE object, and write to it. */
-            //stream = fdopen (fds[1], "w");
-            //fflush (stream);
-            //close (fds[1]);
-            /* Wait for the child process to finish. */
-            syslog(LOG_DEBUG, "Wait %d",pid);
-            waitpid (pid, NULL, 0);
+        // Parent process
+            pids[i] = pid;
+            waitpid(pids[i], NULL, 0);
+            close(fds[i][1]);
+            if(i>0) close(fds[i-1][1]);
         }
-        //close(fds[0]);
-        //close(fds[1]);
-        //syslog(LOG_DEBUG, "One");
     }
 
+     // Wait for all child processes to finish
+    for (int i = 0; i < num_commands; i++) {
+        waitpid(pids[i], NULL, 0);
+        close(fds[i][0]);
+        close(fds[i][1]);
+    }
+
+    write(outfd, "\n", 1);
+    close(outfd);
     free(commands);
+    syslog(LOG_DEBUG, "Execute done");
 }
 
 void parse_command(char *input, char ***commands, int *num_commands) {
-    char *token;
-    char *saveptr;
-    int i;
+    int i,x = 0,last =0;
 
-    // podział wejścia na komendy oddzielone |
     *num_commands = 1;
     for (i = 0; input[i] != '\0'; i++) {
         if (input[i] == '|') {
@@ -74,11 +103,22 @@ void parse_command(char *input, char ***commands, int *num_commands) {
         }
     }
     *commands = malloc((*num_commands) * sizeof(char *));
-    i = 0;
-    token = strtok_r(input, "|", &saveptr);
-    while (token != NULL) {
-        (*commands)[i] = token;
-        i++;
-        token = strtok_r(NULL, "|", &saveptr);
+    
+    for(i = 0 ; input[i] != '\0'; i++){
+        if (input[i] == '|') {
+            int size = i - last +1;
+            (*commands)[x] = malloc(sizeof(char)*size);
+            memcpy((*commands)[x], &input[last], size-1);
+            (*commands)[x][size-1] = '\0';
+            x++;
+            last = i+1;
+        }
     }
+
+    int size = i - last + 1;
+    (*commands)[x] = malloc(size * sizeof(char));
+
+    memcpy((*commands)[x], &input[last], size-1);
+
+    (*commands)[x][size-1] = '\0';
 }
