@@ -32,10 +32,11 @@ void execute(char *task, int mode, char *output_file) {
 
     for (int i = 0; i < num_commands; i++) {
 
-        if (pipe(fds[i]) == -1) {
-            syslog(LOG_DEBUG, "Pipe create failed");
-            exit(EXIT_FAILURE);
-        }
+        if(i != num_commands - 1)
+            if ( pipe(fds[i]) == -1) {
+                syslog(LOG_DEBUG, "Pipe create failed");
+                exit(EXIT_FAILURE);
+            }
 
         pid = fork();
         if (pid == (pid_t) 0) {
@@ -45,6 +46,7 @@ void execute(char *task, int mode, char *output_file) {
             }
             else if (i < num_commands - 1) {
                 dup2(fds[i][1], STDOUT_FILENO);
+                close(fds[i][1]);
             }
 
             if (i == 0) {
@@ -52,7 +54,9 @@ void execute(char *task, int mode, char *output_file) {
             }
             else {
                 dup2(fds[i-1][0], STDIN_FILENO);
+                close(fds[i-1][0]);
             }
+
             // isolate parameters from program
             int j=0;
             char *args[10];
@@ -74,9 +78,11 @@ void execute(char *task, int mode, char *output_file) {
         else {
         // Parent process
             pids[i] = pid;
-            waitpid(pids[i], NULL, 0);
             close(fds[i][1]);
-            if(i>0) close(fds[i-1][1]);
+            if(i>0){
+                close(fds[i-1][0]);
+            }
+            waitpid(pids[i], NULL, 0);
         }
     }
 

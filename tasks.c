@@ -69,6 +69,7 @@ void loadTasks(TASKARRAY *tasks, char *filename) {
         else {
             total++;
         }
+
     }
     close(fileDes);
 
